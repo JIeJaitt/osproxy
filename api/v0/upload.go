@@ -4,6 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path"
+	"strconv"
+	"sync"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/qinguoyi/osproxy/app/models"
 	"github.com/qinguoyi/osproxy/app/pkg/base"
@@ -15,12 +22,6 @@ import (
 	"github.com/qinguoyi/osproxy/bootstrap"
 	"github.com/qinguoyi/osproxy/bootstrap/plugins"
 	"go.uber.org/zap"
-	"io"
-	"os"
-	"path"
-	"strconv"
-	"sync"
-	"time"
 )
 
 /*
@@ -49,7 +50,7 @@ func UploadSingleHandler(c *gin.Context) {
 	expireStr := c.Query("expire")
 	signature := c.Query("signature")
 
-	uid, err, errorInfo := base.CheckValid(uidStr, date, expireStr)
+	uid, errorInfo, err := base.CheckValid(uidStr, date, expireStr)
 	if err != nil {
 		web.ParamsError(c, errorInfo)
 		return
@@ -273,7 +274,7 @@ func UploadMultiPartHandler(c *gin.Context) {
 	expireStr := c.Query("expire")
 	signature := c.Query("signature")
 
-	uid, err, errorInfo := base.CheckValid(uidStr, date, expireStr)
+	uid, errorInfo, err := base.CheckValid(uidStr, date, expireStr)
 	if err != nil {
 		web.ParamsError(c, errorInfo)
 		return
@@ -462,7 +463,7 @@ func UploadMergeHandler(c *gin.Context) {
 	expireStr := c.Query("expire")
 	signature := c.Query("signature")
 
-	uid, err, errorInfo := base.CheckValid(uidStr, date, expireStr)
+	uid, errorInfo, err := base.CheckValid(uidStr, date, expireStr)
 	if err != nil {
 		web.ParamsError(c, errorInfo)
 		return
@@ -493,21 +494,6 @@ func UploadMergeHandler(c *gin.Context) {
 		"storage_uid = ? and status = ?", uid, 1).Order("chunk_num ASC").Find(&multiPartInfoList).Error; err != nil {
 		lgLogger.WithContext(c).Error("查询分片数据失败")
 		web.InternalError(c, "查询分片数据失败")
-		return
-	}
-
-	// 检查是否已存在is_merged=true的情况
-	var mergedCount int64
-	if err := lgDB.Model(&models.MultiPartInfo{}).Where("storage_uid = ? AND is_merged = ?", uid, true).Count(&mergedCount).Error; err != nil {
-		lgLogger.WithContext(c).Error("检查已合并分片失败")
-		web.InternalError(c, "检查已合并分片失败")
-		return
-	}
-
-	// 如果已有分片被标记为已合并，则处理对应逻辑
-	if mergedCount > 0 {
-		lgLogger.WithContext(c).Info("存在已合并的分片，无需重复处理")
-		// 可以根据实际情况决定是返回错误、提示信息还是其它逻辑处理
 		return
 	}
 
@@ -630,7 +616,7 @@ func UploadMergeHandler(c *gin.Context) {
 	}
 
 	// 文件合并成功后，更新所有相关分片的IsMerged为true
-	if err := repo.NewMultiPartInfoRepo().UpdateIsMergedByStorageUid(lgDB, uid, true); err != nil {
+	if err := repo.NewMetaDataInfoCheckRepo().UpdateMerge(lgDB, uid, true); err != nil {
 		lgLogger.WithContext(c).Error("更新分片数据失败")
 		web.InternalError(c, "更新分片数据失败")
 		return
